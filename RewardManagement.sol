@@ -72,9 +72,9 @@ contract RewardManagement is Ownable{
     uint256 constant NODECOUNT_PER_MASTERNFT        = 10;                                   // 10 NODE
     uint256 constant NODECOUNT_PER_GRANDNFT         = 100;                                  // 100 NODE
     uint256 constant MAX_NODE_PER_USER              = 100;                                  // 100 NODE
-    uint256 constant ONE_MONTH_TIME                 = 2592000000;                           // seconds for one month
-    uint256 THREE_MONTH_PRICE                       = 20 * 10**18;                      // 40 USD
-    uint256 CLAIM_FEE                               = 5 * 10**18;                           // 5 USD
+    uint256 constant ONE_MONTH_TIME                 = 2592000;                              // seconds for one month
+    uint256 THREE_MONTH_PRICE                       = 20 * 10**6; //20 * 10**6;             // 40 USD
+    uint256 CLAIM_FEE                               = 5 * 10**6;  //5 * 10**6;              // 5 USD
 
     FireToken public _tokenContract;
     FireNFT public _nftContract;
@@ -93,8 +93,19 @@ contract RewardManagement is Ownable{
         pauseContract = 0;
     }
 
-    function getNodePrice() public view returns (uint256) {
+    function getNodePrice() public pure returns (uint256) {
         return NODE_PRICE;
+    }
+
+    function getMasterNFTPrice() public view returns (uint256) {
+        return getAvaxForFire(MASTER_NFT_PRICE);
+    }
+
+    function getGrandNFTPrice() public view returns (uint256) {
+        return getAvaxForFire(GRAND_NFT_PRICE);
+    }
+    function getClaimFee() public view returns (uint256) {
+        return getAvaxForUSD(CLAIM_FEE);        
     }
 
     function getContractStatus() public view returns (uint256) {
@@ -106,19 +117,11 @@ contract RewardManagement is Ownable{
     }    
 
     function getNodeMaintenanceFee() public view returns (uint256) {
-        return THREE_MONTH_PRICE;
+        return getAvaxForUSD(THREE_MONTH_PRICE);
     }
 
     function setNodeMaintenanceFee(uint256 _newThreeMonthFee) public onlyOwner {
         THREE_MONTH_PRICE = _newThreeMonthFee;
-    }
-
-    function getMasterNFTPrice() public view returns (uint256) {
-        return getAvaxForFire(MASTER_NFT_PRICE);
-    }
-
-    function getGrandNFTPrice() public view returns (uint256) {
-        return getAvaxForFire(GRAND_NFT_PRICE);
     }
 
     function getAvaxForUSD(uint usdAmount) public view returns (uint) {
@@ -135,16 +138,16 @@ contract RewardManagement is Ownable{
         return _joe02Router.getAmountsOut(fireAmount, path)[1];
     }
 
-    function getTreasuryAmount() public returns(uint){
+    function getTreasuryAmount() public view returns(uint){
         return address(_treasuryWallet).balance;
     }
 
-    function getTreasuryRate() public returns(uint){
+    function getTreasuryRate() public view returns(uint){
         uint256 total_balance = address(_treasuryWallet).balance;
         return total_balance.div(_tokenContract.balanceOf(address(this)));
     }
 
-    function quickSort(uint[] memory arr, uint left, uint right) private {
+    function quickSort(uint[] memory arr, uint left, uint right) private view{
         uint i = left;
         uint j = right;
         if (i == j) return;
@@ -168,8 +171,8 @@ contract RewardManagement is Ownable{
     }
 
     function getIntervalArrays(address addr) private view returns(uint256[] memory){
-        NodeInfo[] memory nodes = _nodesOfUser[addr];
-        NFTInfo[] memory nfts = _nftOfUser[addr];
+        NodeInfo[] storage nodes = _nodesOfUser[addr];
+        NFTInfo[] storage nfts = _nftOfUser[addr];
         uint256[] memory result = new uint256[](nodes.length * 2 + nfts.length + 1);
         uint i=0;
         uint j=0;
@@ -290,7 +293,7 @@ contract RewardManagement is Ownable{
     }
 
     function getAvailableNodes(address addr, uint256 checkTime) internal view returns(uint) {
-        NodeInfo[] memory nodes = _nodesOfUser[addr]; 
+        NodeInfo[] storage nodes = _nodesOfUser[addr]; 
         uint res = 0;
         for(uint i=0; i<nodes.length; i++) {
             if(nodes[i].createTime <= checkTime && checkTime <= nodes[i].lastTime) {
@@ -353,8 +356,8 @@ contract RewardManagement is Ownable{
         _maintenanceWallet.transfer(payVal);
     }
 
-    function deleteNodesOfUser(address addr, bool[] memory enableAry) internal{
-        NodeInfo[] memory nodes = _nodesOfUser[addr];
+    function deleteNodesOfUser(address addr, bool[] memory enableAry) private{
+        NodeInfo[] storage nodes = _nodesOfUser[addr];
         for(uint i=enableAry.length-1; i>=0; i--) {
             if(enableAry[i] == false) {
                 if(i != nodes.length - 1) {
@@ -362,18 +365,20 @@ contract RewardManagement is Ownable{
                 }
                 delete nodes[nodes.length-1];
             }
+            if(i==0) {
+                break;
+            }
         }
     }
-    function claimByNode(uint256 nodeId) public payable{
+    function claimByNode(uint256 nodeId) public payable returns(uint256){
         require(pauseContract == 0, "Contract Paused");
-
         require(_nodesOfUser[msg.sender].length > nodeId, "invalid Node ID");
         
         uint256 fiveDolorAvax = getAvaxForUSD(CLAIM_FEE);
         require(msg.sender.balance >= fiveDolorAvax, "no enough balance");
 
         RewardInfo memory rwInfo = getRewardAmount(msg.sender);
-        NodeInfo[] memory nodes = _nodesOfUser[msg.sender];
+        NodeInfo[] storage nodes = _nodesOfUser[msg.sender];
         
         // add rewards and initialize timestamp for all enabled nodes
         for(uint i=0; i<rwInfo.enableNode.length; i++) {
@@ -388,15 +393,15 @@ contract RewardManagement is Ownable{
         }
         // send FireToken rewards of nodeId to msg.sender
         _tokenContract.transfer(msg.sender, rwInfo.nodeRewards[nodeId]);
-
         // delete all disabled nodes
         deleteNodesOfUser(msg.sender, rwInfo.enableNode);
         
         // fee payment 5$ to do
         _maintenanceWallet.transfer(fiveDolorAvax);
+        return rwInfo.nodeRewards[nodeId];
     }
 
-    function claimAll() public payable{
+    function claimAll() public payable returns(uint256){
         require(pauseContract == 0, "Contract Paused");
         
         RewardInfo memory rwInfo = getRewardAmount(msg.sender);
@@ -426,7 +431,7 @@ contract RewardManagement is Ownable{
 
         // delete all disabled nodes
         deleteNodesOfUser(msg.sender, rwInfo.enableNode);
-
+        return rewards;
     }
 
     function getNodeList(address addr) view public returns(NodeInfo[] memory result){
@@ -442,8 +447,8 @@ contract RewardManagement is Ownable{
     function getRewardAmount(address addr) view public returns(RewardInfo memory){
         require(pauseContract == 0, "Contract Paused");
 
-        NFTInfo[] memory nfts = _nftOfUser[addr];
-        NodeInfo[] memory nodes = _nodesOfUser[addr];
+        NFTInfo[] storage nfts = _nftOfUser[addr];
+        NodeInfo[] storage nodes = _nodesOfUser[addr];
 
         RewardInfo memory rwInfo;
         rwInfo.rewardBalance = _rewardsOfUser[addr];
