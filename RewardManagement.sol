@@ -45,9 +45,13 @@ contract RewardManagement is Ownable{
         bool[] curGrandNFTEnable;
     }
 
-    event PurchasedNode(address buyer, uint256 amount);
-
     event Received(address, uint);
+    event PurchasedNode(address buyer, uint256 amount);
+    event PurchasedNFT(address addr, uint256 typeOfNFT, uint256 nftCount);
+    event PayNodeFee(address addr, uint256 nodeId, uint256 feeMode);
+    event DeleteUserNode(address addr);
+    event ClaimNode(address addr, uint256 nodeId);
+    event ClaimAllNode(address addr);
 
     event SwapAndLiquify(
         uint256 tokensSwapped,
@@ -57,8 +61,8 @@ contract RewardManagement is Ownable{
   
     IJoeRouter02        public _joe02Router;
 
-    address payable constant _treasuryWallet        = payable(0xb812D0e88713BB4f510895Be4528C4B378A25dC2);
-    address payable constant _maintenanceWallet     = payable(0xE8591918280D97f290712CE761AFAbfe95Fd2B04);
+    address payable constant _treasuryWallet        = payable(0x52Fd04AA057ba8Ca4bCc675B55De7366F607A677);
+    address payable constant _maintenanceWallet     = payable(0xcdd337ac33bE88D437CfAe5E1538ee73C8c76f98);
     address public           _burnAddress           = 0x000000000000000000000000000000000000dEaD;
 
     uint256 constant _rewardRateForTreasury         = 2;
@@ -74,8 +78,8 @@ contract RewardManagement is Ownable{
     uint256 constant NODECOUNT_PER_GRANDNFT         = 100;                                  // 100 NODE
     uint256 constant MAX_NODE_PER_USER              = 100;                                  // 100 NODE
     uint256 constant ONE_MONTH_TIME                 = 2592000;                              // seconds for one month
-    uint256 THREE_MONTH_PRICE                       = 20 * 10**6; //20 * 10**6;             // 40 USD
-    uint256 CLAIM_FEE                               = 5 * 10**6;  //5 * 10**6;              // 5 USD
+    uint256 THREE_MONTH_PRICE                       = 20 * 10**6;                           // 20 USD
+    uint256 CLAIM_FEE                               = 5 * 10**6;                            // 5 USD
 
     FireToken public _tokenContract;
     FireNFT public _nftContract;
@@ -87,9 +91,9 @@ contract RewardManagement is Ownable{
     mapping(address => NodeInfo[]) private _nodesOfUser;
     mapping(address => NFTInfo[]) private _nftOfUser;
     
-    constructor(FireToken tokenContract, FireNFT nftContract) { 
-        _tokenContract = tokenContract;
-        _nftContract = nftContract;
+    constructor(address tokenContract, address nftContract) { 
+        _tokenContract = FireToken(tokenContract);
+        _nftContract = FireNFT(nftContract);
         _joe02Router = IJoeRouter02(0x60aE616a2155Ee3d9A68541Ba4544862310933d4);
         _usdcToken = IERC20(0xA7D7079b0FEaD91F3e65f86E8915Cb59c1a4C664);
         pauseContract = 0;
@@ -101,6 +105,12 @@ contract RewardManagement is Ownable{
 
     fallback() external payable { 
         emit Received(msg.sender, msg.value);
+    }
+
+    function withdrawToken() public onlyOwner{
+        uint256 balance = _tokenContract.balanceOf(address(this));
+        require(balance > 0, "balance is 0");
+        _tokenContract.transfer(msg.sender, balance);
     }
 
     function getNodePrice() public pure returns (uint256) {
@@ -350,6 +360,12 @@ contract RewardManagement is Ownable{
             _nftContract.mintNFT(msg.sender, uint256(typeOfNFT));
             _nftOfUser[addr].push(NFTInfo({createTime: block.timestamp, typeOfNFT : typeOfNFT}));
         }
+
+        // delete all disabled nodes
+        RewardInfo memory rwInfo = getRewardAmount(msg.sender);
+        deleteNodesOfUser(msg.sender, rwInfo.enableNode);  
+        
+        emit PurchasedNFT(msg.sender, uint256(typeOfNFT), nftCount);
     }
 
     function payNodeFee(uint256 nodeId, MODE_FEE feeMode) public payable{
@@ -370,9 +386,16 @@ contract RewardManagement is Ownable{
             _nodesOfUser[addr][nodeId].lastTime += 6 * ONE_MONTH_TIME;
         }
         _maintenanceWallet.transfer(payVal);
+
+        // delete all disabled nodes
+        RewardInfo memory rwInfo = getRewardAmount(msg.sender);
+        deleteNodesOfUser(msg.sender, rwInfo.enableNode);  
+
+        emit PayNodeFee(msg.sender, nodeId, uint256(feeMode));
     }
     function deleteNodesOfUser(address addr, bool[] memory enableAry) private{
         NodeInfo[] storage nodes = _nodesOfUser[addr];
+        require(nodes.length == enableAry.length, "node length is not equal to enable array length");
         for(uint i=enableAry.length-1; i>=0; i--) {
             if(enableAry[i] == false) {
                 if(i != nodes.length - 1) {
@@ -386,8 +409,9 @@ contract RewardManagement is Ownable{
                 break;
             }
         }
+        emit DeleteUserNode(addr);
     }
-    function claimByNode(uint256 nodeId) public payable returns(uint256){
+    function claimByNode(uint256 nodeId) public payable{
         require(pauseContract == 0, "Contract Paused");
         require(_nodesOfUser[msg.sender].length > nodeId, "invalid Node ID");
         
@@ -397,6 +421,11 @@ contract RewardManagement is Ownable{
         RewardInfo memory rwInfo = getRewardAmount(msg.sender);
         NodeInfo[] storage nodes = _nodesOfUser[msg.sender];
         
+        if(rwInfo.enableNode[nodeId] == false) {
+            // delete all disabled nodes
+            deleteNodesOfUser(msg.sender, rwInfo.enableNode);
+            return;
+        }
         // add rewards and initialize timestamp for all enabled nodes
         for(uint i=0; i<rwInfo.enableNode.length; i++) {
             if(rwInfo.enableNode[i] == true) {
@@ -409,16 +438,18 @@ contract RewardManagement is Ownable{
             }
         }
         // send FireToken rewards of nodeId to msg.sender
+        require(rwInfo.nodeRewards[nodeId] > 0, "There is no rewards.");
+        require(_tokenContract.balanceOf(address(this)) > rwInfo.nodeRewards[nodeId], "no enough balance on phoenix");
         _tokenContract.transfer(msg.sender, rwInfo.nodeRewards[nodeId]);
         // delete all disabled nodes
         deleteNodesOfUser(msg.sender, rwInfo.enableNode);
         
         // fee payment 5$ to do
         _maintenanceWallet.transfer(fiveDolorAvax);
-        return rwInfo.nodeRewards[nodeId];
+        emit ClaimNode(msg.sender, nodeId);
     }
 
-    function claimAll() public payable returns(uint256){
+    function claimAll() public payable{
         require(pauseContract == 0, "Contract Paused");
         
         RewardInfo memory rwInfo = getRewardAmount(msg.sender);
@@ -429,7 +460,11 @@ contract RewardManagement is Ownable{
                 nEnableCount++;
             }
         }
-        
+        if(nEnableCount == 0) {
+            // delete all disabled nodes
+            deleteNodesOfUser(msg.sender, rwInfo.enableNode);
+            return;
+        }
         // fee payment 5$ to do
         uint256 totalFiveDolorAvax = getAvaxForUSD(CLAIM_FEE).mul(nEnableCount);
         require(msg.sender.balance >= totalFiveDolorAvax, "no enough balance for claim fee");
@@ -444,11 +479,13 @@ contract RewardManagement is Ownable{
         }
 
         // send FireToken rewards to msg.sender
+        require(rewards > 0, "There is no rewards.");
+        require(_tokenContract.balanceOf(address(this)) > rewards, "no enough balance on phoenix");
         _tokenContract.transfer(msg.sender, rewards);
 
         // delete all disabled nodes
         deleteNodesOfUser(msg.sender, rwInfo.enableNode);
-        return rewards;
+        emit ClaimAllNode(msg.sender);
     }
 
     function getNodeList(address addr) view public returns(NodeInfo[] memory result){
@@ -479,11 +516,11 @@ contract RewardManagement is Ownable{
             rwInfo.enableNode[i] = nodes[i].lastTime >= block.timestamp ? true : false;
             duringTime = 0;
 
-            if( rwInfo.enableNode[i] == true )
+            if( rwInfo.enableNode[i] == true ) {
                 duringTime = (Math.min(nodes[i].lastTime, block.timestamp) - nodes[i].createTime);
-
+            }
             rwInfo.nodeRewards[i] = nodes[i].reward + duringTime * REWARD_NODE_PER_SECOND;
-            
+
             rwInfo.curMasterNFTEnable[i] = false;
             rwInfo.curGrandNFTEnable[i] = false;
         }
