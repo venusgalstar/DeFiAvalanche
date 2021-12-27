@@ -1,12 +1,11 @@
-//Contract based on https://docs.openzeppelin.com/contracts/3.x/erc721
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.7.3;
+pragma solidity >=0.4.22 <0.9.0;
 pragma experimental ABIEncoderV2;
 
 import "@openzeppelin/contracts/utils/Counters.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/math/Math.sol";
-import "@openzeppelin/contracts/math/SafeMath.sol";
+import "@openzeppelin/contracts/utils/math/Math.sol";
+import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "./FireToken.sol";
 import "./FireNFT.sol";
 import "./IJoeRouter02.sol";
@@ -39,7 +38,7 @@ contract RewardManagement is Ownable{
     }
 
     struct RewardInfo {
-        uint256 rewardBalance;
+        uint256 currentTime;
         uint256[] nodeRewards;
         bool[] enableNode;
         bool[] curMasterNFTEnable;
@@ -47,6 +46,8 @@ contract RewardManagement is Ownable{
     }
 
     event PurchasedNode(address buyer, uint256 amount);
+
+    event Received(address, uint);
 
     event SwapAndLiquify(
         uint256 tokensSwapped,
@@ -56,8 +57,8 @@ contract RewardManagement is Ownable{
   
     IJoeRouter02        public _joe02Router;
 
-    address payable constant _treasuryWallet        = 0xb812D0e88713BB4f510895Be4528C4B378A25dC2;
-    address payable constant _maintenanceWallet     = 0xE8591918280D97f290712CE761AFAbfe95Fd2B04;
+    address payable constant _treasuryWallet        = payable(0xb812D0e88713BB4f510895Be4528C4B378A25dC2);
+    address payable constant _maintenanceWallet     = payable(0xE8591918280D97f290712CE761AFAbfe95Fd2B04);
     address public           _burnAddress           = 0x000000000000000000000000000000000000dEaD;
 
     uint256 constant _rewardRateForTreasury         = 2;
@@ -81,6 +82,7 @@ contract RewardManagement is Ownable{
     
     IERC20 private _usdcToken;
 
+    uint256 public totalNodeCount;
     mapping(address => uint256) private _rewardsOfUser;
     mapping(address => NodeInfo[]) private _nodesOfUser;
     mapping(address => NFTInfo[]) private _nftOfUser;
@@ -91,6 +93,14 @@ contract RewardManagement is Ownable{
         _joe02Router = IJoeRouter02(0x60aE616a2155Ee3d9A68541Ba4544862310933d4);
         _usdcToken = IERC20(0xA7D7079b0FEaD91F3e65f86E8915Cb59c1a4C664);
         pauseContract = 0;
+        totalNodeCount = 0;
+    }
+    receive() external payable {
+        emit Received(msg.sender, msg.value);
+    }
+
+    fallback() external payable { 
+        emit Received(msg.sender, msg.value);
     }
 
     function getNodePrice() public pure returns (uint256) {
@@ -288,14 +298,16 @@ contract RewardManagement is Ownable{
         require(msg.sender.balance >= payVal, "no enough balance");
         _maintenanceWallet.transfer(payVal);
 
+        totalNodeCount += numberOfNodes;
         // emit purchased node event
-        PurchasedNode(msg.sender, numberOfNodes);
+        emit PurchasedNode(msg.sender, numberOfNodes);
     }
 
-    function getAvailableNodes(address addr, uint256 checkTime) internal view returns(uint) {
+    function getAvailableNodes(address addr) public view returns(uint256) {
+        uint256 checkTime = block.timestamp;
         NodeInfo[] storage nodes = _nodesOfUser[addr]; 
-        uint res = 0;
-        for(uint i=0; i<nodes.length; i++) {
+        uint256 res = 0;
+        for(uint256 i=0; i<nodes.length; i++) {
             if(nodes[i].createTime <= checkTime && checkTime <= nodes[i].lastTime) {
                 res++;
             }
@@ -303,11 +315,15 @@ contract RewardManagement is Ownable{
         return res;
     }
 
+    function getTotalNodeCount() public view returns(uint256) {
+        return totalNodeCount;
+    }
+
     function buyNFT(NFT_TYPE typeOfNFT, uint nftCount) public payable{
         require(pauseContract == 0, "Contract Paused");
 
         address addr = msg.sender;
-        uint avNodeCount = getAvailableNodes(addr, block.timestamp);
+        uint avNodeCount = getAvailableNodes(addr);
         uint prevNFTCount = _nftOfUser[addr].length;
         uint MAX_MASTER_NFT_COUNT = NODECOUNT_PER_GRANDNFT / NODECOUNT_PER_MASTERNFT;
         uint prevMasterNFTCount = prevNFTCount == MAX_MASTER_NFT_COUNT+1 ? MAX_MASTER_NFT_COUNT : prevNFTCount;
@@ -339,7 +355,7 @@ contract RewardManagement is Ownable{
     function payNodeFee(uint256 nodeId, MODE_FEE feeMode) public payable{
         require(pauseContract == 0, "Contract Paused");
 
-        address payable addr = msg.sender;
+        address payable addr = payable(msg.sender);
         uint256 payVal;
         require(block.timestamp <= _nodesOfUser[addr][nodeId].lastTime, "deleted node");
         require(block.timestamp + ONE_MONTH_TIME> _nodesOfUser[addr][nodeId].lastTime, "already purchased");
@@ -355,7 +371,6 @@ contract RewardManagement is Ownable{
         }
         _maintenanceWallet.transfer(payVal);
     }
-
     function deleteNodesOfUser(address addr, bool[] memory enableAry) private{
         NodeInfo[] storage nodes = _nodesOfUser[addr];
         for(uint i=enableAry.length-1; i>=0; i--) {
@@ -364,6 +379,8 @@ contract RewardManagement is Ownable{
                     nodes[i] = nodes[nodes.length-1];
                 }
                 delete nodes[nodes.length-1];
+                nodes.pop();
+                totalNodeCount--;
             }
             if(i==0) {
                 break;
@@ -451,7 +468,7 @@ contract RewardManagement is Ownable{
         NodeInfo[] storage nodes = _nodesOfUser[addr];
 
         RewardInfo memory rwInfo;
-        rwInfo.rewardBalance = _rewardsOfUser[addr];
+        rwInfo.currentTime = block.timestamp;
         rwInfo.nodeRewards = new uint256[](nodes.length);
         rwInfo.enableNode = new bool[](nodes.length);
         rwInfo.curMasterNFTEnable = new bool[](nodes.length);

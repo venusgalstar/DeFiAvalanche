@@ -1,23 +1,16 @@
-// SPDX-License-Identifier: UNLICENSED
-/**
- *Submitted for verification at Etherscan.io on 2021-12-06
-*/
-
 // SPDX-License-Identifier: MIT
-
-pragma solidity ^0.7.3;
+pragma solidity >=0.4.22 <0.9.0;
 
 import "@openzeppelin/contracts/utils/Strings.sol";
 import "@openzeppelin/contracts/utils/Address.sol";
 import "@openzeppelin/contracts/utils/Counters.sol";
-import "@openzeppelin/contracts/math/SafeMath.sol";
-import "@openzeppelin/contracts/GSN/Context.sol";
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
-import "@openzeppelin/contracts/token/ERC721/IERC721Metadata.sol";
-import "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
 contract FireNFT is ERC721, Ownable {
+    address private TreasuryWallet;
+    address private RewardWallet;
+    address private MaintenanceWallet;
 
     enum NFT_TYPE{ 
         MASTER_NFT, 
@@ -25,7 +18,6 @@ contract FireNFT is ERC721, Ownable {
     }
    
     using Strings for uint256;
-    using SafeMath for uint256;
 
     uint256 private MAX_MASTER_NFT_SUPPLY;
     uint256 private MAX_MASTER_NFT_SUPPLY_PER_USER;
@@ -142,7 +134,7 @@ contract FireNFT is ERC721, Ownable {
     /**
      * @dev Return the base URI
      */
-     function _baseURI() internal view returns (string memory) {
+     function _baseURI() internal override view returns (string memory) {
         return _baseURIExtended;
     }
 
