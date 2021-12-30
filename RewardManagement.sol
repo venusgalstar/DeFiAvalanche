@@ -305,8 +305,7 @@ contract RewardManagement is Ownable{
         numberOfStaking = numberOfTokens * _rewardRateForStake/10;
         numberOfStaking += numberOfTokens * _rewardRateForLiquidity/10;
 
-        _tokenContract.transferFrom(msg.sender, address(this), numberOfStaking);
-        
+        _tokenContract.transferFrom(msg.sender, address(this), numberOfStaking);        
 
         // send 2 Fire _treasuryWallet
         _tokenContract.transferFrom(msg.sender, _treasuryWallet, numberOfTokens * _rewardRateForTreasury / 10);
@@ -381,8 +380,8 @@ contract RewardManagement is Ownable{
         payCount = 0;
 
         for(uint i=0; i<nodeLength; i++){
-             if(block.timestamp + ONE_MONTH_TIME < _nodesOfUser[msg.sender][i].lastTime) 
-                 continue;
+            if(block.timestamp + ONE_MONTH_TIME < _nodesOfUser[msg.sender][i].lastTime) 
+                continue;
 	    
             if(block.timestamp > _nodesOfUser[msg.sender][i].lastTime) {
                 _nodesOfUser[msg.sender][i].createTime = block.timestamp;
@@ -406,7 +405,7 @@ contract RewardManagement is Ownable{
         require(pauseContract == 0, "Contract Paused");
 
         address payable addr = payable(msg.sender);
-        //require(block.timestamp + ONE_MONTH_TIME> _nodesOfUser[addr][nodeId].lastTime, "already purchased");
+        require(block.timestamp + ONE_MONTH_TIME> _nodesOfUser[addr][nodeId].lastTime, "already purchased");
         if(block.timestamp > _nodesOfUser[addr][nodeId].lastTime) {
             _nodesOfUser[addr][nodeId].createTime = block.timestamp;
             _nodesOfUser[addr][nodeId].lastTime = block.timestamp;
