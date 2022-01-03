@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity >=0.4.22 <0.9.0;
+pragma solidity 0.8.11;
 
 import "@openzeppelin/contracts/utils/Strings.sol";
 import "@openzeppelin/contracts/utils/Address.sol";
@@ -17,6 +17,12 @@ contract FireNFT is ERC721, Ownable {
         GRAND_NFT
     }
    
+    event SetMasterNFTPrice(address addr, uint256 newNFTPrice);
+    event SetGrandNFTPrice(address addr, uint256 newNFTPrice);
+    event SetBaseURI(address addr, string newUri);
+    event SetMasterNFTURI(address addr, string newUri);
+    event SetGrandNFTURI(address addr, string newUri);
+
     using Strings for uint256;
 
     uint256 private MAX_MASTER_NFT_SUPPLY;
@@ -53,6 +59,7 @@ contract FireNFT is ERC721, Ownable {
 
     function setMasterNFTPrice(uint256 _newNFTValue) external onlyOwner{
         MASTER_NFT_PRICE = _newNFTValue;
+        emit SetMasterNFTPrice(owner(), _newNFTValue);
     }
 
     function getMasterNFTPrice() external view returns(uint256){
@@ -61,6 +68,7 @@ contract FireNFT is ERC721, Ownable {
 
     function setGrandNFTPrice(uint256 _newNFTValue) external onlyOwner{
         GRAND_NFT_PRICE = _newNFTValue;
+        emit SetGrandNFTPrice(owner(), _newNFTValue);
     }
 
     function getGrandNFTPrice() external view returns(uint256){
@@ -73,6 +81,7 @@ contract FireNFT is ERC721, Ownable {
 
     function setMasterNFTURI(string memory _masterNFTURI) external onlyOwner{
         masterNFTURI = _masterNFTURI;
+        emit SetMasterNFTURI(owner(), _masterNFTURI);
     }
 
     function getGrandNFTURI() external view returns(string memory){
@@ -81,6 +90,7 @@ contract FireNFT is ERC721, Ownable {
 
     function setGrandNFTURI(string memory _grandNFTURI) external onlyOwner{
         grandNFTURI = _grandNFTURI;
+        emit SetGrandNFTURI(owner(), _grandNFTURI);
     }
 
    /**
@@ -143,5 +153,6 @@ contract FireNFT is ERC721, Ownable {
      */
     function setBaseURI(string memory baseURI_) external onlyOwner() {
         _baseURIExtended = baseURI_;
+        emit SetBaseURI(owner(), baseURI_);
     }
 }
