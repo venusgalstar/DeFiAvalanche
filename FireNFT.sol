@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.11;
+pragma solidity 0.8.7;
 
 import "@openzeppelin/contracts/utils/Strings.sol";
 import "@openzeppelin/contracts/utils/Address.sol";
@@ -22,16 +22,20 @@ contract FireNFT is ERC721, Ownable {
     event SetBaseURI(address addr, string newUri);
     event SetMasterNFTURI(address addr, string newUri);
     event SetGrandNFTURI(address addr, string newUri);
+    event SetRewardWalletAddress(address addr, address rewardWallet);
 
     using Strings for uint256;
 
-    uint256 private MAX_MASTER_NFT_SUPPLY;
-    uint256 private MAX_MASTER_NFT_SUPPLY_PER_USER;
-    uint256 private MASTER_NFT_PRICE;    
+    address constant _multisignWallet               	= 0x697A32dB1BDEF9152F445b06d6A9Fd6E90c02E3e;
+    // address constant _multisignWallet               	= 0x13Bf16A02cF15Cb9059AC93c06bAA58cdB9B2a59;
 
-    uint256 private MAX_GRAND_NFT_SUPPLY;
-    uint256 private MAX_GRAND_NFT_SUPPLY_PER_USER;
-    uint256 private GRAND_NFT_PRICE;
+    uint256 private constant MAX_MASTER_NFT_SUPPLY          = 100000;
+    uint256 private constant MAX_MASTER_NFT_SUPPLY_PER_USER = 10;
+    uint256 private MASTER_NFT_PRICE                        = 10;    //FIRE token
+
+    uint256 private constant MAX_GRAND_NFT_SUPPLY           = 10000;
+    uint256 private constant MAX_GRAND_NFT_SUPPLY_PER_USER  = 1;
+    uint256 private GRAND_NFT_PRICE                         = 100;//FIRE token
 
     using Counters for Counters.Counter;
     Counters.Counter private _masterTokenCounter;
@@ -42,33 +46,37 @@ contract FireNFT is ERC721, Ownable {
     string private masterNFTURI;
     string private grandNFTURI;
 
+    /**
+    * @dev Throws if called by any account other than the multi-signer.
+    */
+    modifier onlyMultiSignWallet() {
+        require(_multisignWallet == _msgSender(), "Multi-signer: caller is not the multi-signer");
+        _;
+    }
+    
     constructor() ERC721("FIRE NFT","FNFT") {
-
-        MAX_MASTER_NFT_SUPPLY = 100000;
-        MAX_MASTER_NFT_SUPPLY_PER_USER = 10;
-        MASTER_NFT_PRICE = 10;          //FIRE token
-
-        MAX_GRAND_NFT_SUPPLY = 10000;
-        MAX_GRAND_NFT_SUPPLY_PER_USER = 1;
-        GRAND_NFT_PRICE = 100;          //FIRE token
-
         _baseURIExtended = "https://ipfs.infura.io/";
+    }
+
+    function setRewardWalletAddress(address _newRewardWallet) external onlyMultiSignWallet{
+        RewardWallet = _newRewardWallet;
+        emit SetRewardWalletAddress(msg.sender, _newRewardWallet);
     }
 
     //Set, Get Price Func
 
-    function setMasterNFTPrice(uint256 _newNFTValue) external onlyOwner{
+    function setMasterNFTPrice(uint256 _newNFTValue) external onlyMultiSignWallet{
         MASTER_NFT_PRICE = _newNFTValue;
-        emit SetMasterNFTPrice(owner(), _newNFTValue);
+        emit SetMasterNFTPrice(msg.sender, _newNFTValue);
     }
 
     function getMasterNFTPrice() external view returns(uint256){
         return MASTER_NFT_PRICE;
     }
 
-    function setGrandNFTPrice(uint256 _newNFTValue) external onlyOwner{
+    function setGrandNFTPrice(uint256 _newNFTValue) external onlyMultiSignWallet{
         GRAND_NFT_PRICE = _newNFTValue;
-        emit SetGrandNFTPrice(owner(), _newNFTValue);
+        emit SetGrandNFTPrice(msg.sender, _newNFTValue);
     }
 
     function getGrandNFTPrice() external view returns(uint256){
@@ -79,24 +87,26 @@ contract FireNFT is ERC721, Ownable {
         return masterNFTURI;
     }
 
-    function setMasterNFTURI(string memory _masterNFTURI) external onlyOwner{
+    function setMasterNFTURI(string memory _masterNFTURI) external onlyMultiSignWallet{
         masterNFTURI = _masterNFTURI;
-        emit SetMasterNFTURI(owner(), _masterNFTURI);
+        emit SetMasterNFTURI(msg.sender, _masterNFTURI);
     }
 
     function getGrandNFTURI() external view returns(string memory){
         return grandNFTURI;
     }
 
-    function setGrandNFTURI(string memory _grandNFTURI) external onlyOwner{
+    function setGrandNFTURI(string memory _grandNFTURI) external onlyMultiSignWallet{
         grandNFTURI = _grandNFTURI;
-        emit SetGrandNFTURI(owner(), _grandNFTURI);
+        emit SetGrandNFTURI(msg.sender, _grandNFTURI);
     }
 
    /**
     * @dev Mint NFT by customer
     */
     function mintNFT(address sender, uint256 _nftType) external{
+
+        require( msg.sender == RewardWallet, "you can't mint from other account");
 
         if( _nftType == uint256(NFT_TYPE.MASTER_NFT) )
         {
@@ -113,8 +123,8 @@ contract FireNFT is ERC721, Ownable {
     */
     function _mintMasterNFT(address sender) internal returns(uint256){
         // Test _masterTokenCounter
-        require(_masterTokenCounter.current() < MAX_MASTER_NFT_SUPPLY, "Master NFT Minting has already ended");
-        require(balanceOf(sender) < MAX_MASTER_NFT_SUPPLY_PER_USER, "Master NFT Minting has already ended");
+        require(_masterTokenCounter.current() < MAX_MASTER_NFT_SUPPLY, "Total Master NFT Minting has already ended");
+        require(balanceOf(sender) < MAX_MASTER_NFT_SUPPLY_PER_USER, "User Master NFT Minting has already ended");
 
         // Incrementing ID to create new token        
         uint256 newMasterNFTID = _masterTokenCounter.current();
@@ -129,9 +139,9 @@ contract FireNFT is ERC721, Ownable {
     */
     function _mintGrandNFT(address sender) internal returns(uint256){
         // Test _grandTokenCounter
-        require(_grandTokenCounter.current() < MAX_GRAND_NFT_SUPPLY, "GRAND NFT Minting has already ended");
-        require(balanceOf(sender) == MAX_MASTER_NFT_SUPPLY_PER_USER, "Master NFT Minting has already ended");
-        require(balanceOf(sender) < MAX_MASTER_NFT_SUPPLY_PER_USER + MAX_GRAND_NFT_SUPPLY_PER_USER, "Grand NFT Minting has already ended");
+        require(_grandTokenCounter.current() < MAX_GRAND_NFT_SUPPLY, "Total GRAND NFT Minting has already ended");
+        require(balanceOf(sender) == MAX_MASTER_NFT_SUPPLY_PER_USER, "User Master NFT Minting hasn't finished");
+        require(balanceOf(sender) < MAX_MASTER_NFT_SUPPLY_PER_USER + MAX_GRAND_NFT_SUPPLY_PER_USER, "User Grand NFT Minting has already ended");
 
         // Incrementing ID to create new token        
         uint256 newGrandNFTID = _grandTokenCounter.current() + MAX_MASTER_NFT_SUPPLY;
@@ -151,8 +161,8 @@ contract FireNFT is ERC721, Ownable {
     /**
      * @dev Set the base URI
      */
-    function setBaseURI(string memory baseURI_) external onlyOwner() {
+    function setBaseURI(string memory baseURI_) external onlyMultiSignWallet() {
         _baseURIExtended = baseURI_;
-        emit SetBaseURI(owner(), baseURI_);
+        emit SetBaseURI(msg.sender, baseURI_);
     }
 }

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.11;
+pragma solidity 0.8.7;
 pragma experimental ABIEncoderV2;
 
 import "@openzeppelin/contracts/utils/Counters.sol";
@@ -29,6 +29,7 @@ contract RewardManagement is Ownable{
     struct NodeInfo {
         uint256 createTime;
         uint256 lastTime;
+        uint256 reward;
     }
 
     struct ImportNodeInfo {
@@ -49,6 +50,7 @@ contract RewardManagement is Ownable{
 
     struct RewardInfo {
         uint256 currentTime;
+        uint256 lastClaimTime;
         uint256[] nodeRewards;
         bool[] enableNode;
         bool[] curMasterNFTEnable;
@@ -63,9 +65,9 @@ contract RewardManagement is Ownable{
     event PayAllNodeFee(address addr, uint256 feeMode);
 
     event DeleteUserNode(address addr);
-    event ClaimNode(address addr, uint256 nodeId);
-    event ClaimAllNode(address addr);
-    event WithdrawAll(address addr);
+    event ClaimNode(address addr, uint256 nodeId, uint256 reward);
+    event ClaimAllNode(address addr, uint256 reward);
+    event WithdrawAll(address addr, uint256 fire, uint256 avax);
     event SetContractStatus(address addr, uint256 _newPauseContract);
     event SetNodeMaintenanceFee(address addr, uint256 newThreeMonthFee);
     event SetNFTContract(address addr);
@@ -84,9 +86,11 @@ contract RewardManagement is Ownable{
   
     IJoeRouter02        public _joe02Router;
 
+    address constant _multisignWallet               = 0x697A32dB1BDEF9152F445b06d6A9Fd6E90c02E3e;
+    // address constant _multisignWallet               = 0x13Bf16A02cF15Cb9059AC93c06bAA58cdB9B2a59;
     address payable constant _treasuryWallet        = payable(0x52Fd04AA057ba8Ca4bCc675B55De7366F607A677);
     address payable constant _maintenanceWallet     = payable(0xcdd337ac33bE88D437CfAe5E1538ee73C8c76f98);
-    address public           _burnAddress           = 0x000000000000000000000000000000000000dEaD;
+    address public  constant _burnAddress           = 0x000000000000000000000000000000000000dEaD;
 
     uint256 constant _rewardRateForTreasury         = 2;
     uint256 constant _rewardRateForStake            = 7;
@@ -99,10 +103,12 @@ contract RewardManagement is Ownable{
     uint256 constant NODECOUNT_PER_GRANDNFT         = 100;                                  // 100 NODE
     uint256 constant MAX_NODE_PER_USER              = 100;                                  // 100 NODE
     uint256 constant ONE_MONTH_TIME                 = 2592000;                              // seconds for one month
+    uint256 constant ONE_DAY_TIME                   = 86400;                                // seconds for one day
     uint256 THREE_MONTH_PRICE                       = 20 * 10**16;                          // 20 AVAX
     uint256 CLAIM_FEE                               = 5 * 10**16;                           // 5 AVAX
     uint256 FIRE_VALUE                              = 1 * 10**18;                           // 10 AVAX 
-    uint256 MAX_MASTER_NFT_COUNT                    = 10;                                   // maximum master nft count
+    uint256 constant MAX_MASTER_NFT_COUNT           = 10;                                   // maximum master nft count
+    uint256 constant MAX_REWARD_PER_CLAIM           = 100 * 10**18;                         // maximum fire count per claim
     FireToken public _tokenContract;
     FireNFT public _nftContract;
     
@@ -110,9 +116,18 @@ contract RewardManagement is Ownable{
 
     uint256 public totalNodeCount;
     mapping(address => uint256) private _rewardsOfUser;
+    mapping(address => uint256) private _lastClaimOfUser;
     mapping(address => NodeInfo[]) private _nodesOfUser;
     mapping(address => NFTInfo[]) private _nftOfUser;
     
+    /**
+    * @dev Throws if called by any account other than the multi-signer.
+    */
+    modifier onlyMultiSignWallet() {
+        require(_multisignWallet == _msgSender(), "Multi-signer: caller is not the multi-signer");
+        _;
+    }
+
     constructor(address tokenContract, address nftContract) { 
         _tokenContract = FireToken(tokenContract);
         _nftContract = FireNFT(nftContract);
@@ -129,42 +144,45 @@ contract RewardManagement is Ownable{
         emit Fallback(msg.sender, msg.value);
     }
 
-    function setNFTContract(address addr) external onlyOwner {
+    function setNFTContract(address addr) external onlyMultiSignWallet {
         _nftContract = FireNFT(addr);
         emit SetNFTContract(addr);
     }
 
-    function clearUserInfo(address addr) external onlyOwner {
+    function clearUserInfo(address addr) external onlyMultiSignWallet {
         totalNodeCount -= _nodesOfUser[addr].length;
         delete _nodesOfUser[addr];
         delete _nftOfUser[addr];
         emit ClearUserInfo(addr);
     }
     
-    function importNodeInfo(ImportNodeInfo[] memory nodeInfos) external onlyOwner{
+    function importNodeInfo(ImportNodeInfo[] memory nodeInfos) external onlyMultiSignWallet{
         uint256 i;
         for(i=0; i<nodeInfos.length; i++) {
             _nodesOfUser[nodeInfos[i].buyer].push(
-                NodeInfo({ createTime: nodeInfos[i].createTime, lastTime:nodeInfos[i].createTime + ONE_MONTH_TIME * 3})
+                NodeInfo({ createTime: nodeInfos[i].createTime, lastTime:nodeInfos[i].createTime + ONE_MONTH_TIME * 3, reward:0})
             );
             totalNodeCount++;
         }
         require(i==nodeInfos.length, "not complete transaction");
-        emit ImportNode(owner(), nodeInfos.length);
+        emit ImportNode(msg.sender, nodeInfos.length);
     }
 
-    function importNftInfo(ImportNftInfo[] memory nftInfos) external onlyOwner {
+    function importNftInfo(ImportNftInfo[] memory nftInfos, bool bNewMint) external onlyMultiSignWallet {
         uint256 i;
         for(i=0; i<nftInfos.length; i++) {
             _nftOfUser[nftInfos[i].addr].push(
                 NFTInfo({ createTime: nftInfos[i].createTime, typeOfNFT: NFT_TYPE(nftInfos[i].typeOfNFT)})
             );
+            if(bNewMint == true) {
+                _nftContract.mintNFT(nftInfos[i].addr, nftInfos[i].typeOfNFT);     
+            }
         }
         require(i==nftInfos.length, "not complete transaction");
-        emit ImportNFT(owner(), nftInfos.length);
+        emit ImportNFT(msg.sender, nftInfos.length);
     }
 
-    function withdrawAll() external onlyOwner{
+    function withdrawAll() external onlyMultiSignWallet{
         uint256 balance = _tokenContract.balanceOf(address(this));
         if(balance > 0) {
             _tokenContract.transfer(msg.sender, balance);
@@ -174,21 +192,21 @@ contract RewardManagement is Ownable{
         if(address(this).balance > 0) {
             mine.transfer(address(this).balance);
         }
-        emit WithdrawAll(owner());
+        emit WithdrawAll(msg.sender, balance, address(this).balance);
     }
 
-    function setNodePrice(uint256 _newNodePrice) external onlyOwner () {
+    function setNodePrice(uint256 _newNodePrice) external onlyMultiSignWallet () {
         NODE_PRICE = _newNodePrice;
-        emit SetNodePrice(owner(), _newNodePrice);
+        emit SetNodePrice(msg.sender, _newNodePrice);
     }
 
     function getNodePrice() external view returns (uint256) {
         return NODE_PRICE;
     }
 
-    function setFireValue(uint256 _newFireValue) external onlyOwner(){
+    function setFireValue(uint256 _newFireValue) external onlyMultiSignWallet(){
         FIRE_VALUE = _newFireValue;
-        emit SetFireValue(owner(), _newFireValue);
+        emit SetFireValue(msg.sender, _newFireValue);
     }
 
     function getFireValue() external  view returns(uint256){
@@ -203,9 +221,9 @@ contract RewardManagement is Ownable{
         return FIRE_VALUE * NODECOUNT_PER_GRANDNFT;
     }
 
-    function setClaimFee(uint256 _newClaimFee) external onlyOwner () {
+    function setClaimFee(uint256 _newClaimFee) external onlyMultiSignWallet () {
         CLAIM_FEE = _newClaimFee;
-        emit SetClaimFee(owner(), _newClaimFee); 
+        emit SetClaimFee(msg.sender, _newClaimFee); 
     }
 
     function getClaimFee() external view returns (uint256) {
@@ -216,18 +234,18 @@ contract RewardManagement is Ownable{
         return pauseContract;
     }
 
-    function setContractStatus(uint256 _newPauseContract) external onlyOwner {
+    function setContractStatus(uint256 _newPauseContract) external onlyMultiSignWallet {
         pauseContract = _newPauseContract;
-        emit SetContractStatus(owner(), _newPauseContract);
+        emit SetContractStatus(msg.sender, _newPauseContract);
     }
 
     function getNodeMaintenanceFee() external view returns (uint256) {
         return THREE_MONTH_PRICE;
     }
 
-    function setNodeMaintenanceFee(uint256 _newThreeMonthFee) external onlyOwner {
+    function setNodeMaintenanceFee(uint256 _newThreeMonthFee) external onlyMultiSignWallet {
         THREE_MONTH_PRICE = _newThreeMonthFee;
-	emit SetNodeMaintenanceFee(owner(), _newThreeMonthFee);
+	emit SetNodeMaintenanceFee(msg.sender, _newThreeMonthFee);
     }
     
     function getTotalNodeCount() external view returns(uint256) {
@@ -336,7 +354,7 @@ contract RewardManagement is Ownable{
         // make node for buyer
         for(uint256 i=0; i<numberOfNodes; i++) {
             _nodesOfUser[msg.sender].push(
-                NodeInfo({ createTime: block.timestamp, lastTime:block.timestamp + ONE_MONTH_TIME * 3})
+                NodeInfo({ createTime: block.timestamp, lastTime:block.timestamp + ONE_MONTH_TIME * 3, reward:0})
             );
         }
 
@@ -406,6 +424,7 @@ contract RewardManagement is Ownable{
             if(block.timestamp > _nodesOfUser[msg.sender][i].lastTime) {
                 _nodesOfUser[msg.sender][i].createTime = block.timestamp;
                 _nodesOfUser[msg.sender][i].lastTime = block.timestamp;
+                _nodesOfUser[msg.sender][i].reward = 0;
             }
             if(feeMode == MODE_FEE.THREE_MONTH) {
                 _nodesOfUser[msg.sender][i].lastTime += 3 * ONE_MONTH_TIME;
@@ -429,6 +448,7 @@ contract RewardManagement is Ownable{
         if(block.timestamp > _nodesOfUser[addr][nodeId].lastTime) {
             _nodesOfUser[addr][nodeId].createTime = block.timestamp;
             _nodesOfUser[addr][nodeId].lastTime = block.timestamp;
+            _nodesOfUser[addr][nodeId].reward = 0;
         }
         if(feeMode == MODE_FEE.THREE_MONTH) {
             require(msg.value == THREE_MONTH_PRICE, "no enough balance");
@@ -445,7 +465,8 @@ contract RewardManagement is Ownable{
     function claimByNode(uint256 nodeId) external payable{
         require(pauseContract == 0, "Contract Paused");
         require(_nodesOfUser[msg.sender].length > nodeId, "invalid Node ID");
-        require(msg.value == CLAIM_FEE, "no enough balance");        
+        require(msg.value == CLAIM_FEE, "no enough balance");
+        require(block.timestamp > _lastClaimOfUser[msg.sender] + ONE_DAY_TIME, "should claim once within 1 day");
         
         require(_nodesOfUser[msg.sender][nodeId].lastTime > block.timestamp, "expired node claim"); 
 
@@ -456,15 +477,23 @@ contract RewardManagement is Ownable{
         // send FireToken rewards of nodeId to msg.sender
         require(nodeReward > 0, "There is no rewards.");
         require(_tokenContract.balanceOf(address(this)) > nodeReward, "no enough balance on phoenix");
+        if(nodeReward > MAX_REWARD_PER_CLAIM) {
+            _nodesOfUser[msg.sender][nodeId].reward = nodeReward - MAX_REWARD_PER_CLAIM;
+            nodeReward = MAX_REWARD_PER_CLAIM;
+        }
         _tokenContract.transfer(msg.sender, nodeReward);
+        
+        // set last claim time
+        _lastClaimOfUser[msg.sender] = block.timestamp;
         
         // fee payment 5$ to do
         _maintenanceWallet.transfer(msg.value);
-        emit ClaimNode(msg.sender, nodeId);
+        emit ClaimNode(msg.sender, nodeId, nodeReward);
     }
 
     function claimAll() external payable{
         require(pauseContract == 0, "Contract Paused");
+        require(block.timestamp > _lastClaimOfUser[msg.sender] + ONE_DAY_TIME, "should claim once within 1 day");
 
         uint256 nodeCount = _nodesOfUser[msg.sender].length;
         NFTInfo[] storage nfts = _nftOfUser[msg.sender];
@@ -480,22 +509,31 @@ contract RewardManagement is Ownable{
         }
                 
         uint256 rewards = 0;
+        uint256 oneReward;
         uint256 nEnableCount = 0;
         uint256 duringTime;
         for(uint i=0; i<nodeCount; i++) {
             if(_nodesOfUser[msg.sender][i].lastTime >= block.timestamp) {
-                rewards += (block.timestamp - _nodesOfUser[msg.sender][i].createTime) * REWARD_NODE_PER_SECOND;
+                oneReward = _nodesOfUser[msg.sender][i].reward;
+                oneReward += (block.timestamp - _nodesOfUser[msg.sender][i].createTime) * REWARD_NODE_PER_SECOND;
                 if(nEnableCount < masterNftCount) {
                     duringTime = block.timestamp - Math.max(_nodesOfUser[msg.sender][i].createTime, nfts[nEnableCount / NODECOUNT_PER_MASTERNFT].createTime);
-                    rewards += duringTime * REWARD_MASTER_NFT_PER_SECOND;
+                    oneReward += duringTime * REWARD_MASTER_NFT_PER_SECOND;
                 }
                 if(nEnableCount < grandNftCount) {
                     duringTime = block.timestamp - Math.max(_nodesOfUser[msg.sender][i].createTime, nfts[nEnableCount / NODECOUNT_PER_GRANDNFT].createTime);
-                    rewards += duringTime * REWARD_GRAND_NFT_PER_SECOND;
+                    oneReward += duringTime * REWARD_GRAND_NFT_PER_SECOND;
                 }
                 
                 _nodesOfUser[msg.sender][i].createTime = block.timestamp;
+                _nodesOfUser[msg.sender][i].reward = 0;
                 nEnableCount++;
+                if(rewards + oneReward > MAX_REWARD_PER_CLAIM) {
+                    _nodesOfUser[msg.sender][i].reward = rewards + oneReward - MAX_REWARD_PER_CLAIM;
+                    rewards = MAX_REWARD_PER_CLAIM;
+                    break;
+                }
+                rewards += oneReward;
             }
         }
 
@@ -508,7 +546,9 @@ contract RewardManagement is Ownable{
         require(_tokenContract.balanceOf(address(this)) > rewards, "no enough balance on phoenix");
         _tokenContract.transfer(msg.sender, rewards);
 
-        emit ClaimAllNode(msg.sender);
+        // set last claim time
+        _lastClaimOfUser[msg.sender] = block.timestamp;
+        emit ClaimAllNode(msg.sender, rewards);
     }
 
 
@@ -530,7 +570,7 @@ contract RewardManagement is Ownable{
         uint256 enableGrandNftCount = Math.min(grandNftCount, nodeLength / NODECOUNT_PER_GRANDNFT);
 
         duringTime = block.timestamp - nodeCreatTime;
-        rewardAmount = duringTime * REWARD_NODE_PER_SECOND;
+        rewardAmount = _nodesOfUser[addr][nodeId].reward + duringTime * REWARD_NODE_PER_SECOND;
 
         //calculate master nft rewards per nodes
         if(nodeId < enableMasterNftCount * NODECOUNT_PER_MASTERNFT) {
@@ -545,12 +585,13 @@ contract RewardManagement is Ownable{
         return rewardAmount;
     }
 
-    function getRewardAmount(address addr) view public returns(RewardInfo memory){
-        NFTInfo[] storage nfts = _nftOfUser[addr];
-        NodeInfo[] storage nodes = _nodesOfUser[addr];
+    function getRewardAmount(address addr) view external returns(RewardInfo memory){
+        NFTInfo[] memory nfts = _nftOfUser[addr];
+        NodeInfo[] memory nodes = _nodesOfUser[addr];
 
         RewardInfo memory rwInfo;
         rwInfo.currentTime = block.timestamp;
+        rwInfo.lastClaimTime = _lastClaimOfUser[addr];
         rwInfo.nodeRewards = new uint256[](nodes.length);
         rwInfo.enableNode = new bool[](nodes.length);
         rwInfo.curMasterNFTEnable = new bool[](nodes.length);
@@ -563,7 +604,7 @@ contract RewardManagement is Ownable{
         for(i=0; i<nodes.length; i++) {
             rwInfo.curMasterNFTEnable[i] = false;
             rwInfo.curGrandNFTEnable[i] = false;
-            rwInfo.nodeRewards[i] = 0;
+            rwInfo.nodeRewards[i] = nodes[i].reward;
             if( nodes[i].lastTime >= block.timestamp) {
                 rwInfo.enableNode[i] = true;
                 enableNodeCount++;
@@ -587,7 +628,7 @@ contract RewardManagement is Ownable{
         for(i=0; i<nodes.length; i++) {
             if( rwInfo.enableNode[i] == true ) {
                 duringTime = block.timestamp - nodes[i].createTime;
-                rwInfo.nodeRewards[i] = duringTime * REWARD_NODE_PER_SECOND;
+                rwInfo.nodeRewards[i] += duringTime * REWARD_NODE_PER_SECOND;
 
                 //calculate master nft rewards per nodes
                 if(applyMasterNFT < enableMasterNftCount * NODECOUNT_PER_MASTERNFT) {
