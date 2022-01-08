@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.7;
+pragma solidity ^0.8.7;
 
 import "@openzeppelin/contracts/utils/Strings.sol";
 import "@openzeppelin/contracts/utils/Address.sol";
@@ -50,7 +50,7 @@ contract FireNFT is ERC721, Ownable {
     * @dev Throws if called by any account other than the multi-signer.
     */
     modifier onlyMultiSignWallet() {
-        require(_multisignWallet == _msgSender(), "Multi-signer: caller is not the multi-signer");
+        require(owner() == _msgSender(), "Multi-signer: caller is not the multi-signer");
         _;
     }
     

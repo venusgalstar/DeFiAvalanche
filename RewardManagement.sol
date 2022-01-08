@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.7;
+pragma solidity ^0.8.7;
 pragma experimental ABIEncoderV2;
 
 import "@openzeppelin/contracts/utils/Counters.sol";
@@ -124,7 +124,7 @@ contract RewardManagement is Ownable{
     * @dev Throws if called by any account other than the multi-signer.
     */
     modifier onlyMultiSignWallet() {
-        require(_multisignWallet == _msgSender(), "Multi-signer: caller is not the multi-signer");
+        require(owner() == _msgSender(), "Multi-signer: caller is not the multi-signer");
         _;
     }
 
