@@ -359,7 +359,7 @@ contract RewardManagement is Ownable{
         }
 
         // pay 3 months fee
-        require(msg.value == THREE_MONTH_PRICE, "no enough balance");
+        require(msg.value == THREE_MONTH_PRICE * numberOfNodes, "no enough balance");
         _maintenanceWallet.transfer(msg.value);
 
         totalNodeCount += numberOfNodes;
@@ -390,7 +390,7 @@ contract RewardManagement is Ownable{
             nftPrice = NODECOUNT_PER_MASTERNFT * FIRE_VALUE;
         }
         // payment with avax
-        require(msg.value == nftPrice, "no enough AVAX");
+        require(msg.value == nftPrice * nftCount, "no enough AVAX");
         _maintenanceWallet.transfer(msg.value);     
 
         for(uint i=0; i<nftCount; i++) {
